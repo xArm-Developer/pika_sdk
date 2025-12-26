@@ -5,7 +5,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="agx-pypika",
-    version="0.1.0",
+    version="0.1.1",
     author="Agilex Robotics RoboPPN",
     author_email="support@agilex.ai",
     description="Pika SDK for robotics applications",

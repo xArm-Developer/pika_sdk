@@ -308,7 +308,7 @@ class SerialComm:
             # 如果没有找到完整的JSON对象，保留缓冲区
             return None
         except json.JSONDecodeError as e:
-            logger.error(f"JSON解析错误: {e}")
+            # logger.error(f"JSON解析错误: {e}")
             self.buffer = ""  # 跳过错误的开始位置
             return None
         except Exception as e:
