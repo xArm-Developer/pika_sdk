@@ -179,22 +179,43 @@ class SerialComm:
                 if data:
                     # 将读取到的数据添加到缓冲区
                     self.buffer += data.decode('utf-8', errors='ignore')
-                    
-                    # 查找完整的JSON对象
-                    json_data = self._find_json()
-                    if json_data:
-                        # 如果设置了回调函数，则调用回调函数
-                        if self.callback:
-                            self.callback(json_data)
+                    # # 查找完整的JSON对象
+                    # json_data = self._find_json()
+                    # if json_data:
+                    #     # 如果设置了回调函数，则调用回调函数
+                    #     if self.callback:
+                    #         self.callback(json_data)
                         
+                    #     # 更新最新数据
+                    #     with self.data_lock:
+                    #         self.latest_data = json_data
+                    # # 缓冲区数据长度大于2000字节就将其清空
+                    # else:
+                    #     if len(self.buffer) > 2000:
+                    #         self.buffer = ""
+
+
+                    # 为什么串口上报要用json? (不理解)
+                    #   无法有效的分割开每一帧数据
+                    #   每一帧数据里面80%都是重复的, 影响传输效率
+                    # 注意:
+                    #   如果系统的实时性不够, 可能会一次性读取到几帧数据, 如果只处理第一帧数据, 剩余帧数据留到下次处理, 那么时间累积会导致无法处理到最新的数据, 响应就会严重滞后
+
+                    # 查找所有完整的JSON对象
+                    json_datas = self._find_all_json()
+                    if json_datas:
+                        for json_data in json_datas:
+                            # 如果设置了回调函数，则调用回调函数
+                            if self.callback:
+                                self.callback(json_data)
                         # 更新最新数据
                         with self.data_lock:
-                            self.latest_data = json_data
+                            self.latest_data = json_datas[-1]
                     # 缓冲区数据长度大于2000字节就将其清空
                     else:
                         if len(self.buffer) > 2000:
                             self.buffer = ""
-                
+
                 # 短暂休眠，避免CPU占用过高
                 time.sleep(0.001)
             except Exception as e:
@@ -203,6 +224,55 @@ class SerialComm:
         
         logger.info("串口读取线程已停止")
     
+    def _find_all_json(self):
+        """
+        在缓冲区中查找所有完整的JSON对象
+
+        返回: 返回包含所有json对象的列表
+        """
+        json_datas = []
+        try:
+            msg = self.buffer
+            left_indices = [match.start() for match in re.finditer('{', msg)]
+            right_indices = [match.start() for match in re.finditer('}', msg)]
+            if len(left_indices) == 0 or len(right_indices) == 0:
+                return json_datas
+            if left_indices[0] > right_indices[0]:
+                return json_datas
+            json_start = left_indices[0]
+            json_end = None
+            json_str = None
+            json_str_list = []
+            for i in range(1, len(left_indices)):
+                if i > len(right_indices):
+                    break
+                if left_indices[i] > right_indices[i-1]:
+                    json_end = right_indices[i-1]
+                    json_str = msg[json_start:json_end+1]
+                    json_str_list.append(json_str)
+                    self.buffer = msg[json_end+1:]
+                    json_start = left_indices[i]
+                elif i == len(left_indices) - 1 and i < len(right_indices):
+                    if left_indices[i] < right_indices[i]:
+                        json_end = right_indices[i]
+                        json_str = msg[json_start:json_end+1]
+                        json_str_list.append(json_str)
+                        self.buffer = msg[json_end+1:]
+            for json_str in json_str_list:
+                # --- 关键修改：处理多余的逗号 ---
+                cleaned_json_str = re.sub(r',\s*}', '}', json_str)
+                cleaned_json_str = re.sub(r',\s*\]', ']', cleaned_json_str)
+                json_datas.append(json.loads(cleaned_json_str))
+            return json_datas
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON解析错误: {e}")
+            self.buffer = ""  # 跳过错误的开始位置
+            return json_datas
+        except Exception as e:
+            logger.error(f"通信Json异常: {e}")
+            self.buffer = ""
+            return json_datas
+
     def _find_json(self):
         """
         在缓冲区中查找完整的JSON对象
